@@ -73,71 +73,142 @@ vec2 march_ray(vec2 origin, vec2 direction, float step_size)
 
     for (uint x = 0; x <= max_raymarch_iter; x++)
     {
-        if (current_position.x > screen_dimensions.x && current_position.y > screen_dimensions.y)
+        if (current_position.x <= screen_dimensions.x && current_position.y <= screen_dimensions.y)
         {
-            current_position = current_position + step_size*direction;
         
             vec2 texturePosition = current_position/screen_dimensions;
             int pixelID = texture(rasterized_texture, texturePosition).x;
 
-            if (pixelID >= 0)
+            if (pixelID > 0)
             {
-                return current_position;
+                return current_position; // Return intersection
             }
         }
+        current_position = current_position + step_size*direction;
      }
+     return vec2(-1, -1); // No intersection found
 }
+
+vec2 hash2(vec2 p) {
+    // Hash function adapted for 2D input
+    p = vec2(dot(p, vec2(127.1, 311.7)),
+             dot(p, vec2(269.5, 183.3)));
+    return fract(sin(p) * 43758.5453);
+}
+
+uint xseed = 632891u;
+uint yseed = 283954u;
 
 void main()
 {
-    int numSamples = 100;
 
     vec2 pixelCenter = gl_FragCoord.xy;
-    uint xseed = 69420u * int(pixelCenter.x);
-    uint yseed = 69420u * int(pixelCenter.y);
 
-    vec3 averageColor = vec3(0.f);
 
-    for(int i = 0; i < numSamples; i++)
-    {
-        //If a shape is hit we can sample it
-        bool hit = false;
-        vec2 intersectionPos = vec2(-1,-1);
+    vec3 accumulatedColour = vec3(0.0);
+    int totalSamples = 0;
+    vec4 circleColour;
 
-        float x = get_random_numbers(xseed);
-        float y = get_random_numbers(yseed);
+    //If a shape is hit we can sample it
+    bool hit = false;
+    vec2 intersectionPos = vec2(-1,-1);
 
-        vec2 random_direction = vec2(x, y);
+    vec2 xy = pixelCenter* get_random_numbers(xseed);
+    xy *= get_random_numbers(yseed);
     
-        intersectionPos = march_ray(pixelCenter, random_direction, step_size);
+    vec2 random_direction = hash2(xy);
 
-        vec2 texCoord = intersectionPos/screen_dimensions;
+    random_direction = normalize(random_direction);
+    
+    intersectionPos = march_ray(pixelCenter, random_direction, step_size);
 
-        if (intersectionPos.x > -1 && intersectionPos.y > -1)
-        {
-            hit = true;
+    vec2 texCoord = intersectionPos/screen_dimensions;
+        
+
+    if (intersectionPos.x > -1 && intersectionPos.y > -1)
+    {
+        hit = true;
+    }
+
+    if(hit){
+        // ---- Circle
+        if (shape_type == 0) {
+
+            int circleID = texture(rasterized_texture, texCoord).x;
+            circleColour = circles[circleID].color;
+                
+                
+            //check if pixelCenter is within circle (circleID)
+            if (distance(pixelCenter,circles[circleID].position) < circles[circleID].radius)
+            {
+                accumulatedColour += circleColour.xyz;
+                totalSamples += 1;  // Increase the sample count
+                    
+            }
+                
         }
+            
+        // ---- Line
+        else if (shape_type == 1) {
+            
+            //outColor = texture(rasterized_texture, pixelCenter /screen_dimensions);
+            // Get the line ID from the rasterized texture
+            int lineID = texture(rasterized_texture, texCoord).x;
+            
+            // Retrieve line data from the buffer
+            vec2 lineStart = lines[lineID].start_point;
+            vec2 lineEnd = lines[lineID].end_point;
+            vec4 colorLeft = lines[lineID].color_left[0];  // Use the left color for sampling
+            vec4 colorRight = lines[lineID].color_right[0]; // Use the right color for sampling
+            
+            // Calculate the line direction and length
+            vec2 lineDirection = lineEnd - lineStart;
+            float lineLength = length(lineDirection);
+            vec2 lineDirNormalized = normalize(lineDirection);
+            
+            // Project the pixel center onto the line to find the closest point on the line segment
+            vec2 startToPixel = pixelCenter - lineStart;
+            float projectionLength = dot(startToPixel, lineDirNormalized);
+            vec2 closestPointOnLine;
+            
+            // Determine the closest point on the line segment
+            if (projectionLength < 0.0) {
+                closestPointOnLine = lineStart;  // Before the start of the line
+            } else if (projectionLength > lineLength) {
+                closestPointOnLine = lineEnd;    // After the end of the line
+            } else {
+                closestPointOnLine = lineStart + lineDirNormalized * projectionLength;
+            }
+            
+            // Calculate the distance from the pixel to the closest point on the line
+            float distanceToLine = distance(closestPointOnLine, pixelCenter);
+            
+            // Handle round caps at the start and end points
+            float distanceToStart = distance(lineStart, pixelCenter);
+            float distanceToEnd = distance(lineEnd, pixelCenter);
 
-        if(hit){
-            // ---- Circle
-            if (shape_type == 0) {
-                vec4 pixelColour;
-                int circleID = texture(rasterized_texture, texCoord).x;
-                vec4 circleColour = circles[circleID].color;
-                //check if pixelCenter is within circle (circleID)
-                if (distance(pixelCenter,circles[circleID].position) < circles[circleID].radius)
-                {
-                
-                    //keep sample
-                    //pixelColour = ;
-                }
-                
+            float side = sign((lineEnd.x - lineStart.x) * (pixelCenter.y - lineStart.y) - (lineEnd.y - lineStart.y) * (pixelCenter.x - lineStart.x));
+
+            // Weight calculation
+            float weight = 1.0 / (length(pixelCenter - intersectionPos) + 0.001); // epsilon value
+            // If the pixel is close enough to the line, add color to the accumulated colour
+            // Choose color based on the distance to start or end for linear gradient
+            if (distanceToStart <= step_size) {
+                accumulatedColour += weight * colorLeft.xyz; // Color from the start cap
+            } else if (distanceToEnd < step_size) {
+                accumulatedColour += weight * colorRight.xyz; // Color from the end cap
+            } else {
+                // Blend colors for a smooth transition along the line
+                float blendFactor = 1.0 - (distanceToLine / step_size); // Blending based on distance
+                accumulatedColour += mix(colorLeft.xyz, colorRight.xyz, blendFactor);
             }
-            // ---- Line
-            else if (shape_type == 1) {
-            }
+            totalSamples += 1;  // Increase the sample count
         }
     }
 
-    outColor = vec4(0);
+    vec3 previousAccumulatedColor = texture(accumulator_texture, pixelCenter/screen_dimensions).xyz;
+
+    accumulatedColour = (previousAccumulatedColor + accumulatedColour)/2.f;
+
+    outColor = vec4(accumulatedColour, totalSamples);
 }

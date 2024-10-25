@@ -74,5 +74,43 @@ void main()
 
     // ---- LINE
     else if (shape_type == 1) {
+        vec2 pixelCentre = gl_FragCoord.xy;
+        shape_id = -1;
+
+        for (int x = 0; x < line_count; x++) {
+            vec2 lineStart = lines[x].start_point;
+            vec2 lineEnd = lines[x].end_point;
+
+            // Calculate the direction vector and length of the line
+            vec2 lineDirection = lineEnd - lineStart;
+            float lineLength = length(lineDirection);
+
+            // Project the pixel onto the line to find the closest point on the line segment
+            vec2 startToPixel = pixelCentre - lineStart;
+            float projectionLength = dot(startToPixel, lineDirection) / lineLength;
+            vec2 closestPointOnLine = vec2(-1.f, -1.f);
+
+            if (projectionLength <= 0.f) {
+                closestPointOnLine = lineStart;  // Before the start of the line
+            } else if (projectionLength >= lineLength) {
+                closestPointOnLine = lineEnd;    // After the end of the line
+            } else {
+                closestPointOnLine = lineStart + normalize(lineDirection) * projectionLength;
+            }
+
+            // Calculate the distance from the pixel to the closest point on the line
+            float distanceToLine = distance(pixelCentre, closestPointOnLine);
+
+            // Handle the round caps at the start and end points
+            float distanceToStart = distance(lineStart, pixelCentre);
+            float distanceToEnd = distance(lineEnd, pixelCentre);
+
+            if ((distanceToLine <= rasterize_width)) {
+                if (shape_id < 0) {
+                    shape_id = x;
+                    break;
+                }
+            }
+        }
     }
 }

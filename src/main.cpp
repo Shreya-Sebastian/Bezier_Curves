@@ -15,7 +15,7 @@ DISABLE_WARNINGS_POP()
 #include "shapes.h"
 
 //Resolution and boilerplate for the window
-constexpr glm::ivec2 resolution{ 512, 512 };
+constexpr glm::ivec2 resolution{ 1024, 1024 };
 std::unique_ptr<Window> pWindow;
 std::unique_ptr<Trackball> pTrackball;
 
